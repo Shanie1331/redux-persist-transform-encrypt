@@ -1,77 +1,181 @@
-# redux-persist-transform-encrypt
+# @shanie1331/redux-persist-transform-encrypt
 
-[![npm](https://img.shields.io/npm/v/redux-persist-transform-encrypt.svg?maxAge=3600)](https://www.npmjs.com/package/redux-persist-transform-encrypt)
-[![CI](https://github.com/maxdeviant/redux-persist-transform-encrypt/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/maxdeviant/redux-persist-transform-encrypt/actions/workflows/ci.yml)
+> A maintained fork of [`redux-persist-transform-encrypt`](https://github.com/maxdeviant/redux-persist-transform-encrypt), updated because the original has been archived.  
+> This fork fixes modern build/export issues, ships **ESM + CJS** bundles, and includes **TypeScript typings**.
 
-Encrypt your Redux store.
+[![npm](https://img.shields.io/npm/v/@shanie1331/redux-persist-transform-encrypt.svg)](https://www.npmjs.com/package/@shanie1331/redux-persist-transform-encrypt)
 
-## Maintenance notice
+Encrypt your Redux store when persisting with `redux-persist`.
 
-As of February 2, 2024, I will longer be maintaining `redux-persist-transform-encrypt`.
+---
 
-I have been supporting it as best I can these past few years, but the reality of it is I have not used `redux-persist-transform-encrypt`, `redux-persist`, or Redux since 2017.
+## Why this fork?
 
-Since I no longer use any of the technologies involved and don't have a good way of testing any potential changes, I am no longer in a position where I feel I can maintain this package to my desired standards.
+The original library is archived and may cause:
 
-Additionally, `redux-persist` as a project also seems dead, despite an attempted change in management.
+- `Cannot find module` / `Failed to resolve the path`
+- Export/interop issues (`import` vs `require`)
+- TypeScript errors
+
+This fork is drop-in compatible and actively maintained.
+
+---
 
 ## Installation
 
-`redux-persist-transform-encrypt` must be used in conjunction with `redux-persist`, so make sure you have that installed as well.
+Requires `redux-persist@^6`.
 
-#### Yarn
+```bash
+# npm
+npm install @shanie1331/redux-persist-transform-encrypt redux-persist
 
-```sh
-yarn add redux-persist-transform-encrypt
+# yarn
+yarn add @shanie1331/redux-persist-transform-encrypt redux-persist
+
+# pnpm
+pnpm add @shanie1331/redux-persist-transform-encrypt redux-persist
 ```
 
-#### npm
-
-```sh
-npm install redux-persist-transform-encrypt
-```
+---
 
 ## Usage
 
-### Synchronous
+### ESM
 
-```js
+```ts
 import { persistReducer } from 'redux-persist';
-import { encryptTransform } from 'redux-persist-transform-encrypt';
+import storage from 'redux-persist/lib/storage'; // or AsyncStorage in RN
+import { encryptTransform } from '@shanie1331/redux-persist-transform-encrypt';
+import rootReducer from './rootReducer';
 
-const reducer = persistReducer(
-  {
-    transforms: [
-      encryptTransform({
-        secretKey: 'my-super-secret-key',
-        onError: function (error) {
-          // Handle the error.
-        },
-      }),
-    ],
-  },
-  baseReducer
-);
+const persistConfig = {
+  key: 'root',
+  storage,
+  transforms: [
+    encryptTransform({
+      secretKey: 'my-super-secret-key',
+      onError(error) {
+        console.error('[persist-encrypt] error:', error);
+      },
+    }),
+  ],
+};
+
+export default persistReducer(persistConfig, rootReducer);
 ```
 
-### Asynchronous
+### CommonJS
 
-Asynchronous support was removed in v3.0.0, as it was never fully supported and is not able to be implemented correctly given the current constraints that `redux-persist` imposes on transforms. See [#48](https://github.com/maxdeviant/redux-persist-transform-encrypt/issues/48) for more details.
+```js
+const { persistReducer } = require('redux-persist');
+const storage = require('redux-persist/lib/storage').default;
+const {
+  encryptTransform,
+} = require('@shanie1331/redux-persist-transform-encrypt');
 
-### Custom Error Handling
+const persistConfig = {
+  key: 'root',
+  storage,
+  transforms: [
+    encryptTransform({
+      secretKey: process.env.SECRET_KEY,
+      onError: err => console.error(err),
+    }),
+  ],
+};
 
-The `onError` property given to the `encryptTransform` options is an optional
-function that receives an `Error` object as its only parameter. This allows
-custom error handling from the parent application.
+module.exports = persistReducer(persistConfig, require('./rootReducer'));
+```
 
-## Secret Key Selection
+### React Native (AsyncStorage)
 
-The `secretKey` provided to `encryptTransform` is used as a passphrase to generate a 256-bit AES key which is then used to encrypt the Redux store.
+```ts
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { persistReducer } from 'redux-persist';
+import { encryptTransform } from '@shanie1331/redux-persist-transform-encrypt';
+import rootReducer from './rootReducer';
 
-You **SHOULD NOT** use a single secret key for all users of your application, as this negates any potential security benefits of encrypting the store in the first place.
+const persistConfig = {
+  key: 'root',
+  storage: AsyncStorage,
+  transforms: [
+    encryptTransform({
+      secretKey: '<per-user-secret-here>',
+      onError: e => console.log(e),
+    }),
+  ],
+};
 
-You **SHOULD NOT** hard-code or generate your secret key anywhere on the client, as this risks exposing the key since the JavaScript source is ultimately accessible to the end-user.
+export default persistReducer(persistConfig, rootReducer);
+```
 
-If you are only interested in persisting the store over the course of a single session and then invalidating the store, consider using the user's access token or session key as the secret key.
+---
 
-For long-term persistence, you will want to use a unique, deterministic key that is provided by the server. For example, the server could derive a hash from the user's ID and a salt (also stored server-side) and then return that hash to the client to use to decrypt the store. Placing this key retrieval behind authentication would prevent someone from accessing the encrypted store data if they are not authenticated as the user.
+## API
+
+### `encryptTransform(options)`
+
+| Option    | Type                     | Required | Description                                                                 |
+| --------- | ------------------------ | -------- | --------------------------------------------------------------------------- |
+| secretKey | `string`                 | yes      | Passphrase used to derive a 256‑bit AES key.                                |
+| onError   | `(error: Error) => void` | no       | Handle encryption/decryption errors (wipe storage, logout, telemetry, etc.) |
+
+> Internally uses `crypto-js` for AES and `json-stringify-safe` for robust serialization.
+
+---
+
+## Security notes: picking a secret
+
+- **Do not hardcode** one global secret for all users.
+- Prefer **per‑user, deterministic secrets** provided by your backend (e.g., derived from user id + server salt) behind auth.
+- For session-only persistence, a session/access token can be acceptable.
+- If decryption fails, use `onError` to wipe the persisted state and rehydrate cleanly.
+
+---
+
+## Output & Types
+
+This fork publishes bundled dual builds:
+
+- ESM entry: `lib/index.js`
+- CJS entry: `lib/index.cjs`
+- Types: `lib/index.d.ts`
+
+Works with Node, Webpack, Vite, and React Native toolchains.
+
+---
+
+## Troubleshooting
+
+- **“Cannot find module …/lib/index.cjs or index.js”**  
+  Ensure you installed the **scoped** fork: `@shanie1331/redux-persist-transform-encrypt`.
+
+- **ESM error like “Cannot find module './sync.js'”**  
+  Old multi-file ESM output caused this. This fork ships **bundled single-file** entries for both ESM and CJS.
+
+- **Decryption error on app start**  
+  Your `secretKey` changed (user switched, old cache). Handle via `onError` and clear persisted storage.
+
+---
+
+## Migration from the archived package
+
+1. Replace imports:
+   ```diff
+   - import { encryptTransform } from 'redux-persist-transform-encrypt'
+   + import { encryptTransform } from '@shanie1331/redux-persist-transform-encrypt'
+   ```
+2. Keep only one transform instance; order can matter relative to other transforms.
+3. If your keying strategy changed, expect one-time wipe of persisted state via `onError`.
+
+---
+
+## Contributing
+
+PRs and issues are welcome. Please include a minimal repro when reporting interop problems.
+
+---
+
+## License
+
+MIT © Shashank Malviya
